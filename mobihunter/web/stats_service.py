@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app_review.neighborhood_stats import aggregate_by_neighborhood
+from app_review.neighborhood_stats import aggregate_by_neighborhood, city_label
 
 
 def _archived(r: dict[str, Any]) -> bool:
@@ -34,6 +34,11 @@ def _has_price(r: dict[str, Any]) -> bool:
 def records_for_market_charts(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Lista usada nos gráficos de bairro: não arquivados (visão de mercado atual)."""
     return [r for r in records if not _archived(r)]
+
+
+def records_in_city(records: list[dict[str, Any]], city: str) -> list[dict[str, Any]]:
+    """Filtra pelo rótulo de cidade (mesma regra que nas agregações)."""
+    return [r for r in records if city_label(r) == city]
 
 
 def collect_kpis(records: list[dict[str, Any]]) -> dict[str, int]:
@@ -86,36 +91,34 @@ def chart_rows_neighborhoods(
     return rows
 
 
-def label_city_hood(row: dict[str, Any]) -> str:
-    """Rótulo curto para eixo: bairro, com cidade se necessário."""
-    h = row["neighborhood"]
-    c = row["city"]
-    if c and c != "(sem cidade)":
-        return f"{h} · {c}"
-    return h
+def _chart_row_label(row: dict[str, Any]) -> str:
+    """Eixo Y na página de stats (já filtrada por uma cidade): só o bairro."""
+    return str(row.get("neighborhood") or "(sem bairro)")
 
 
 def build_chart_price_mean(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Série para gráfico: preço médio (R$) por bairro, só onde há preço."""
-    labels: list[str] = []
-    values: list[float] = []
+    """Série para gráfico: preço médio (R$) por bairro; maior valor no topo do gráfico."""
+    pairs: list[tuple[str, float]] = []
     for r in rows:
         pm = r.get("price_mean")
         if pm is not None:
-            labels.append(label_city_hood(r))
-            values.append(round(float(pm), 2))
+            pairs.append((_chart_row_label(r), round(float(pm), 2)))
+    pairs.sort(key=lambda x: x[1], reverse=True)
+    labels = [p[0] for p in pairs]
+    values = [p[1] for p in pairs]
     return {"labels": labels, "values": values}
 
 
 def build_chart_brl_m2(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Série para gráfico: R$/m² (mediana do conjunto por bairro)."""
-    labels: list[str] = []
-    values: list[float] = []
+    """Série para gráfico: R$/m² por bairro; maior valor no topo do gráfico."""
+    pairs: list[tuple[str, float]] = []
     for r in rows:
         v = r.get("brl_m2_median")
         if v is None:
             v = r.get("brl_m2_mean")
         if v is not None:
-            labels.append(label_city_hood(r))
-            values.append(round(float(v), 2))
+            pairs.append((_chart_row_label(r), round(float(v), 2)))
+    pairs.sort(key=lambda x: x[1], reverse=True)
+    labels = [p[0] for p in pairs]
+    values = [p[1] for p in pairs]
     return {"labels": labels, "values": values}

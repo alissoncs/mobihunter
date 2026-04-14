@@ -20,6 +20,7 @@ from app_review.filters import (
     apply_filters,
     sort_records_active_first_price_asc,
     sort_records_active_first_price_desc,
+    sort_records_active_first_recent_desc,
 )
 from scripts.importers.sqlite_store import DEFAULT_DB_PATH
 from mobihunter.web.records import (
@@ -31,12 +32,17 @@ from mobihunter.web.records import (
     price_previous_display,
     thumb_url,
 )
+from app_review.neighborhood_stats import (
+    distinct_cities_sorted,
+    most_common_city_label,
+)
 from mobihunter.web.stats_service import (
     build_chart_brl_m2,
     build_chart_price_mean,
     chart_rows_neighborhoods,
     collect_kpis,
     records_for_market_charts,
+    records_in_city,
 )
 
 _BASE = Path(__file__).resolve().parent
@@ -47,6 +53,9 @@ app = FastAPI(title="Mobihunter", description="Listagem de imóveis")
 DEFAULT_PAGE_SIZE = 50
 MIN_PAGE_SIZE = 25
 MAX_PAGE_SIZE = 100
+
+# Estatísticas: cidade pré-selecionada quando `?city=` não é passado (se existir na base).
+DEFAULT_STATS_CITY = "Porto Alegre"
 
 
 def _distinct_neighborhoods(records: list[dict[str, Any]]) -> list[str]:
@@ -71,6 +80,7 @@ def _imoveis_query_dict(
     neighborhood: str,
     only_like: bool,
     show_dislikes: bool,
+    recent_first: bool,
     per_page: int,
     page: int,
     sort: str,
@@ -91,6 +101,8 @@ def _imoveis_query_dict(
         d["only_like"] = "1"
     if show_dislikes:
         d["show_dislikes"] = "1"
+    if recent_first:
+        d["recent_first"] = "1"
     if sort.strip() == "price_desc":
         d["sort"] = "price_desc"
     d["per_page"] = str(per_page)
@@ -107,6 +119,7 @@ def _imoveis_query_string(
     neighborhood: str,
     only_like: bool,
     show_dislikes: bool,
+    recent_first: bool,
     per_page: int,
     page: int,
     sort: str,
@@ -120,6 +133,7 @@ def _imoveis_query_string(
             neighborhood=neighborhood,
             only_like=only_like,
             show_dislikes=show_dislikes,
+            recent_first=recent_first,
             per_page=per_page,
             page=page,
             sort=sort,
@@ -187,6 +201,10 @@ async def list_imoveis(
         None,
         description="Incluir imóveis com dislike (por defeito ficam ocultos)",
     ),
+    recent_first: str | None = Query(
+        None,
+        description="Mais recentes primeiro por data de importação",
+    ),
     listing_status: str | None = Query(
         None,
         description="all | active | archived | removed",
@@ -209,6 +227,7 @@ async def list_imoveis(
     code_i = _parse_int(code)
     only_l = _parse_bool(only_like)
     show_d = _parse_bool(show_dislikes)
+    recent_f = _parse_bool(recent_first)
     ls = _norm_listing_status(listing_status)
     hood_q = (neighborhood or "").strip() or None
     sort_mode = (sort or "price_asc").strip().lower()
@@ -242,7 +261,9 @@ async def list_imoveis(
         neighborhood=hood_q,
         show_dislikes=show_d,
     )
-    if sort_mode == "price_desc":
+    if recent_f:
+        filtered = sort_records_active_first_recent_desc(filtered)
+    elif sort_mode == "price_desc":
         filtered = sort_records_active_first_price_desc(filtered)
     else:
         filtered = sort_records_active_first_price_asc(filtered)
@@ -272,6 +293,7 @@ async def list_imoveis(
         neighborhood=hood_val,
         only_like=only_l,
         show_dislikes=show_d,
+        recent_first=recent_f,
         per_page=pp,
         sort=sort_mode,
     )
@@ -289,6 +311,7 @@ async def list_imoveis(
             "code": code or "",
             "only_like": only_l,
             "show_dislikes": show_d,
+            "recent_first": recent_f,
             "listing_status": ls_form,
             "neighborhood": hood_val,
             "sort": sort_mode,
@@ -315,7 +338,13 @@ async def list_imoveis(
 
 
 @app.get("/stats", response_class=HTMLResponse)
-async def stats_page(request: Request) -> HTMLResponse:
+async def stats_page(
+    request: Request,
+    city: str | None = Query(
+        None,
+        description="Cidade: restringe KPIs e gráficos. Omitido usa Porto Alegre se existir na base.",
+    ),
+) -> HTMLResponse:
     records, _src, load_err = try_load_records()
     if load_err is not None:
         return templates.TemplateResponse(
@@ -330,8 +359,38 @@ async def stats_page(request: Request) -> HTMLResponse:
             status_code=503,
         )
 
-    kpis = collect_kpis(records)
-    market = records_for_market_charts(records)
+    city_options = distinct_cities_sorted(records)
+    if not city_options:
+        return templates.TemplateResponse(
+            request,
+            "stats.html",
+            {
+                "request": request,
+                "kpis": None,
+                "chart_price": {"labels": [], "values": []},
+                "chart_m2": {"labels": [], "values": []},
+                "nav_active": "stats",
+                "market_count": 0,
+                "hood_groups_count": 0,
+                "chart_price_height": 320,
+                "chart_m2_height": 320,
+                "city_options": [],
+                "city_selected": None,
+                "stats_empty": True,
+            },
+        )
+
+    raw_city = (city or "").strip()
+    if raw_city and raw_city in city_options:
+        selected_city = raw_city
+    elif DEFAULT_STATS_CITY in city_options:
+        selected_city = DEFAULT_STATS_CITY
+    else:
+        selected_city = most_common_city_label(records) or city_options[0]
+
+    scoped = records_in_city(records, selected_city)
+    kpis = collect_kpis(scoped)
+    market = records_for_market_charts(scoped)
     all_hood_rows = chart_rows_neighborhoods(market, limit=None)
     chart_price = build_chart_price_mean(all_hood_rows)
     chart_m2 = build_chart_brl_m2(all_hood_rows)
@@ -353,6 +412,9 @@ async def stats_page(request: Request) -> HTMLResponse:
             "hood_groups_count": len(all_hood_rows),
             "chart_price_height": chart_price_height,
             "chart_m2_height": chart_m2_height,
+            "city_options": city_options,
+            "city_selected": selected_city,
+            "stats_empty": False,
         },
     )
 

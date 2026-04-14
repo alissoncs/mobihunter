@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 
@@ -58,11 +59,26 @@ def _hood_label(rec: dict[str, Any]) -> str:
     return t
 
 
+def city_label(rec: dict[str, Any]) -> str:
+    """Rótulo de cidade normalizado (igual ao usado nas agregações)."""
+    return _city_label(rec)
+
+
 def distinct_cities_sorted(records: list[dict[str, Any]]) -> list[str]:
     seen: set[str] = set()
     for r in records:
         seen.add(_city_label(r))
     return sorted(seen, key=str.lower)
+
+
+def most_common_city_label(records: list[dict[str, Any]]) -> str | None:
+    """Cidade com mais registos; desempate por ordem lexicográfica (case-insensitive)."""
+    if not records:
+        return None
+    cnt = Counter(_city_label(r) for r in records)
+    best = max(cnt.values())
+    candidates = [c for c, n in cnt.items() if n == best]
+    return min(candidates, key=str.casefold)
 
 
 def aggregate_by_neighborhood(

@@ -207,6 +207,16 @@ def sort_records_active_first_price_desc(records: list[dict[str, Any]]) -> list[
     return items
 
 
+def sort_records_active_first_recent_desc(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mais recentes primeiro por `imported_at`; arquivados continuam no fim."""
+    items = list(records)
+    rid = lambda r: str(r.get("id", ""))
+    # Ordenação estável: primeiro por data desc, depois força não arquivados no topo.
+    items.sort(key=lambda r: (_imported(r), rid(r)), reverse=True)
+    items.sort(key=lambda r: _archived_int(r))
+    return items
+
+
 def distinct_agencies(records: list[dict[str, Any]]) -> list[str]:
     s = {_norm(str(r.get("agency") or "")) for r in records}
     return sorted(x for x in s if x)

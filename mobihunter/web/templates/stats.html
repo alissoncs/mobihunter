@@ -39,17 +39,42 @@
     .chart-card .sub { font-size: 0.78rem; color: #64748b; font-weight: 500; margin: -0.35rem 0 0.75rem; }
     .chart-wrap { position: relative; width: 100%; }
     .empty-chart { color: #94a3b8; font-size: 0.9rem; padding: 2rem; text-align: center; }
+    .stats-city-bar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem;
+      margin-bottom: 1rem; padding: 0.75rem 1rem;
+      background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+    }
+    .stats-city-bar label { font-size: 0.85rem; font-weight: 600; color: #334155; }
+    .stats-city-bar select {
+      min-width: 12rem; padding: 0.45rem 0.65rem; font-size: 0.95rem;
+      border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #0f172a;
+    }
 {% endblock %}
 
 {% block content %}
+  {% if stats_empty %}
+    <p class="stats-intro">Não há <strong>cidade</strong> identificada nos registos (campo vazio em todos). Adicione ou importe anúncios com cidade.</p>
+  {% else %}
+  <form method="get" action="/stats" class="stats-city-bar" aria-label="Filtrar por cidade">
+    <div>
+      <label for="stats-city">Cidade</label>
+      <select name="city" id="stats-city" onchange="this.form.submit()">
+        {% for c in city_options %}
+          <option value="{{ c }}" {% if c == city_selected %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
   <p class="stats-intro">
-    Contadores sobre <strong>toda a base</strong>. Os gráficos usam só imóveis <strong>não arquivados</strong>
-    ({{ market_count }} registo(s)), <strong>todos os grupos cidade+bairro</strong> ({{ hood_groups_count }}) por volume de anúncios.
-    Cada barra só aparece se houver preço médio ou R$/m² calculável para esse grupo.
+    Contadores e gráficos para <strong>{{ city_selected }}</strong> apenas.
+    Os gráficos usam imóveis <strong>não arquivados</strong> nesta cidade
+    ({{ market_count }} na amostra de mercado), <strong>{{ hood_groups_count }}</strong> grupo(s) bairro por volume.
+    Cada barra só aparece se houver preço médio ou R$/m² calculável para esse bairro.
   </p>
 
   <div class="kpi-grid" role="region" aria-label="Resumo numérico">
-    <div class="kpi"><div class="val">{{ kpis.total }}</div><div class="lbl">Total na base</div></div>
+    <div class="kpi"><div class="val">{{ kpis.total }}</div><div class="lbl">Imóveis nesta cidade</div></div>
     <div class="kpi"><div class="val">{{ kpis.ativos }}</div><div class="lbl">Não arquivados</div></div>
     <div class="kpi"><div class="val">{{ kpis.arquivados }}</div><div class="lbl">Arquivados</div></div>
     <div class="kpi"><div class="val">{{ kpis.removidos_site }}</div><div class="lbl">Removidos do site</div></div>
@@ -80,9 +105,11 @@
       {% endif %}
     </div>
   </div>
+  {% endif %}
 {% endblock %}
 
 {% block extra_scripts %}
+{% if not stats_empty %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 <script>
 (function() {
@@ -172,4 +199,5 @@
   }
 })();
 </script>
+{% endif %}
 {% endblock %}
