@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{% block title %}Mobihunter{% endblock %}</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      color: #0f172a;
+      --header: #0f766e;
+      --header2: #0d9488;
+    }
+    html, body { height: 100%; margin: 0; }
+    body.app {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      background: #f1f5f9;
+    }
+    .site-header {
+      flex-shrink: 0;
+      background: linear-gradient(135deg, var(--header) 0%, var(--header2) 100%);
+      color: #fff;
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      align-items: baseline;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      box-shadow: 0 2px 8px rgba(15, 118, 110, 0.25);
+    }
+    .site-header .brand {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+    .site-header .tagline {
+      font-size: 0.85rem;
+      opacity: 0.92;
+      font-weight: 500;
+    }
+    main.main {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem 1.25rem 1.25rem;
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
+    }
+    {% block extra_css %}{% endblock %}
+  </style>
+</head>
+<body class="app">
+  <header class="site-header" role="banner">
+    <span class="brand">Mobihunter</span>
+    {% block header_extra %}<span class="tagline">{% block tagline %}{% endblock %}</span>{% endblock %}
+  </header>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -58,6 +58,26 @@ def _property_type(rec: dict[str, Any]) -> str:
     return ""
 
 
+def _archived_int(rec: dict[str, Any]) -> int:
+    v = rec.get("archived")
+    if v is None:
+        return 0
+    try:
+        return 1 if int(v) else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _source_inactive_int(rec: dict[str, Any]) -> int:
+    v = rec.get("source_inactive")
+    if v is None:
+        return 0
+    try:
+        return 1 if int(v) else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def apply_filters(
     records: list[dict[str, Any]],
     *,
@@ -67,12 +87,19 @@ def apply_filters(
     text_query: str,
     tags_any: list[str] | None,
     property_type: str | None,
+    only_like: bool = False,
+    listing_status: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Filtra em memória."""
+    """Filtra em memória.
+
+    ``listing_status``: ``None`` ou ``\"all\"`` = todos; ``\"active\"`` = não arquivado e ativo na origem;
+    ``\"archived\"``; ``\"removed\"`` = removido do site (source_inactive).
+    """
     tq = _norm(text_query)
     tag_set = {_norm(x) for x in (tags_any or []) if _norm(x)}
     pt = _norm(property_type) if property_type else ""
     ag = _norm(agency) if agency else ""
+    ls = _norm(listing_status) if listing_status else ""
 
     out: list[dict[str, Any]] = []
     for r in records:
@@ -91,6 +118,20 @@ def apply_filters(
                 continue
         if pt and _property_type(r) != pt:
             continue
+        if only_like and str(r.get("review_status") or "") != "like":
+            continue
+        if ls and ls not in ("", "all"):
+            a = _archived_int(r)
+            si = _source_inactive_int(r)
+            if ls == "active":
+                if a != 0 or si != 0:
+                    continue
+            elif ls == "archived":
+                if a == 0:
+                    continue
+            elif ls == "removed":
+                if si == 0:
+                    continue
         out.append(r)
     return out
 

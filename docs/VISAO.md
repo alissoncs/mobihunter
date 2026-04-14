@@ -1,6 +1,8 @@
 # Mobihunter — visão do produto e roteiro em fases
 
-Este documento descreve o objetivo do projeto, o modelo de dados único em JSON, a organização de pastas, o contrato dos importadores por imobiliária e o aplicativo de revisão em Python. Serve como referência antes e durante a implementação por fases.
+**Estado atual:** os importadores gravam em **SQLite** (`data/imoveis.db`); a antiga UI (Streamlit/NiceGUI) foi removida. A **próxima stack de revisão** (web ou outra) está por definir.
+
+Este documento descreve o objetivo do projeto, o modelo de dados, a organização de pastas, o contrato dos importadores por imobiliária e o que se espera de uma futura aplicação de revisão. Serve como referência antes e durante a implementação por fases.
 
 ## 1. Objetivo
 
@@ -10,7 +12,7 @@ O Mobihunter é um buscador pessoal de imóveis online: você configura **links 
 
 1. **Entrada:** URLs de listagens ou detalhes, por imobiliária, definidas manualmente ou em lista de configuração.
 2. **Importação:** scripts Python **separados por imobiliária** (ex.: Foxter primeiro) que fazem requisição HTTP, extraem dados do HTML ou de APIs internas do site e gravam registros normalizados no JSON central.
-3. **Revisão:** um front-end minimalista (recomendação: **Streamlit**) lê o mesmo JSON, exibe tabela com filtros e imagens, e persiste alterações de **revisão manual** de volta no arquivo.
+3. **Revisão:** uma aplicação (stack a definir) lê os dados (JSON ou SQLite, conforme a implementação), exibe tabela com filtros e imagens, e persiste alterações de **revisão manual**.
 
 ```mermaid
 flowchart LR
@@ -55,7 +57,7 @@ Todos os importadores escrevem no **mesmo** ficheiro (por exemplo `data/imoveis.
 |---------|--------|
 | `data/imoveis.json` | Arquivo canónico dos imóveis. Versionar com cuidado (dados sensíveis ou volume grande podem justificar `.gitignore` + ficheiro de exemplo numa fase posterior). |
 | `scripts/importers/` | Um script ou módulo por imobiliária; `common.py` para carregar/gravar JSON, normalização, deduplicação e merge. |
-| `app_review/` | Aplicação Python de revisão (Streamlit recomendado). |
+| `app_review/` | Lógica partilhada (filtros, paginação, persistência de revisão); UI removida até nova stack. |
 
 ## 5. Importadores (Foxter primeiro)
 
@@ -70,15 +72,15 @@ Cada imobiliária tem **o seu** script (ex.: `scripts/importers/foxter.py`). Nov
 
 A técnica exata (scraping estático vs. inspeção de rede) fica para a fase de implementação do importador Foxter.
 
-## 6. Front-end de revisão: Python simples
+## 6. Front-end de revisão (a definir)
 
-Para **tabela**, **filtros** e **visualização de imagens** com pouco código, a documentação recomenda **Streamlit**:
+A escolha anterior (Streamlit / NiceGUI) foi descontinuada no repositório. Para a próxima iteração, candidatos típicos incluem:
 
-- Tabela editável ou dataframe com filtros na barra lateral.
-- Filtros por: imobiliária, faixa de preço, texto (bairro/endereço), tags.
-- Galeria ou pré-visualização de imagens (`st.image`, colunas com miniaturas).
+- **SPA + API** (React/Vue/Svelte + FastAPI) — máximo controlo de UX.
+- **HTMX + servidor** — menos JavaScript, páginas rápidas de iterar.
+- **Framework Python full-stack** (Reflex, Solara, etc.) — um só runtime, trade-offs de UX.
 
-**Alternativas** (mais trabalho ou foco diferente): NiceGUI, Gradio, Flask + Jinja.
+Requisitos funcionais abaixo mantêm-se; a tecnologia é deliberadamente aberta.
 
 ## 7. Requisitos funcionais do app de revisão
 
@@ -95,7 +97,7 @@ Para **tabela**, **filtros** e **visualização de imagens** com pouco código, 
 | **Fase 0** | Documentação; `requirements.txt` esqueleto; pastas vazias ou `.gitkeep` onde fizer sentido. |
 | **Fase 1** | Schema acordado; `data/imoveis.json` inicial `[]`; `common.py` com ler/gravar, merge e deduplicação. |
 | **Fase 2** | Importador Foxter + configuração de URLs. |
-| **Fase 3** | App Streamlit: visualização, filtros, edição e persistência no JSON. |
+| **Fase 3** | App de revisão (stack nova): visualização, filtros, edição e persistência (JSON/SQLite conforme modelo vigente). |
 | **Fase 4** | Segunda imobiliária (novo script); ajustes no normalizador se necessário. |
 
 ---

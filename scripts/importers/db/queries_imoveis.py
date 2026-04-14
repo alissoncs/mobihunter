@@ -25,8 +25,8 @@ INSERT INTO imoveis (
     price_changed_at, price_change_count,
     thumbnail_url, photos_json, address, city, neighborhood, state,
     features_json, tags_json, category, rating, notes, comments,
-    review_status
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    review_status, archived, source_inactive
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 UPDATE_IMOVEL_AFTER_IMPORT = """
@@ -55,7 +55,9 @@ UPDATE imoveis SET
     rating = ?,
     notes = ?,
     comments = ?,
-    review_status = ?
+    review_status = ?,
+    archived = ?,
+    source_inactive = ?
 WHERE id = ?
 """
 
@@ -71,6 +73,13 @@ UPDATE imoveis SET
     rating = ?,
     notes = ?,
     comments = ?,
-    review_status = ?
+    review_status = ?,
+    archived = ?
 WHERE id = ?
 """
+
+UPDATE_REVIEW_STATUS_ONLY = (
+    "UPDATE imoveis SET review_status = ? WHERE id = ?"
+)
+
+UPDATE_ARCHIVED_ONLY = "UPDATE imoveis SET archived = ? WHERE id = ?"

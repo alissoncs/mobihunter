@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Mobihunter — Base de dados{% endblock %}
+{% block tagline %}Erro na base{% endblock %}
+{% block extra_css %}
+    .err-box {
+      background: #fff;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .err-box p { margin: 0.35rem 0; }
+    h2.page-title { font-size: 1.1rem; color: #991b1b; margin: 0 0 0.75rem; font-weight: 700; }
+    code { font-size: 0.85rem; background: #f1f5f9; padding: 0.15rem 0.35rem; border-radius: 4px; word-break: break-all; }
+    ul { margin: 0.5rem 0 0; padding-left: 1.25rem; color: #475569; line-height: 1.55; }
+    .hint { font-size: 0.9rem; color: #64748b; }
+    a { color: #0d9488; font-weight: 600; }
+{% endblock %}
+
+{% block content %}
+  <h2 class="page-title">Não foi possível usar a base de dados</h2>
+  <div class="err-box">
+    <p><strong>{{ message }}</strong></p>
+    <p class="hint">Ficheiro: <code>{{ db_path }}</code></p>
+  </div>
+  <ul>
+    <li>Se o ficheiro estiver <strong>corrompido</strong> ou não for SQLite, apaga <code>data/imoveis.db</code> e volta a correr o importador (<code>python scripts/importers/foxter.py</code>).</li>
+    <li>Confirma <strong>permissões de leitura</strong> na pasta <code>data/</code>.</li>
+    <li>Fecha outros programas que possam ter a base aberta (evita “database is locked”).</li>
+  </ul>
+  <p><a href="/">Tentar outra vez</a></p>
+{% endblock %}

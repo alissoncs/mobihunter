@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,23 @@ DEFAULT_DB_PATH: Path = PROJECT_ROOT / "data" / "imoveis.db"
 PRICE_EPS = 0.01
 
 
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    """Apenas tabelas base (não views): evita confundir com objetos homónimos."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _imoveis_has_columns(conn: sqlite3.Connection) -> bool:
+    """True se `imoveis` existe e PRAGMA table_info devolve colunas (tabela utilizável)."""
+    if not _table_exists(conn, "imoveis"):
+        return False
+    cur = conn.execute("PRAGMA table_info(imoveis)")
+    return len(cur.fetchall()) > 0
+
+
 def connect_db(path: Path | None = None) -> sqlite3.Connection:
     p = path or DEFAULT_DB_PATH
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -33,15 +51,23 @@ def connect_db(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    _migrate_listing_code(conn)
-    _migrate_review_status(conn)
-    conn.commit()
+    # Só migrar se a tabela base existir e tiver colunas; senão criar schema (ficheiro vazio
+    # ou BD inconsistente onde sqlite_master não bate certo com a tabela real).
+    if not _imoveis_has_columns(conn):
+        init_schema(conn)
+    else:
+        _migrate_listing_code(conn)
+        _migrate_review_status(conn)
+        _migrate_archived_columns(conn)
+        conn.commit()
     return conn
 
 
 def _migrate_listing_code(conn: sqlite3.Connection) -> None:
     cur = conn.execute("PRAGMA table_info(imoveis)")
     cols = {r[1] for r in cur.fetchall()}
+    if not cols:
+        return
     if "listing_code" not in cols:
         conn.execute("ALTER TABLE imoveis ADD COLUMN listing_code INTEGER")
     conn.execute(
@@ -56,8 +82,27 @@ def _migrate_listing_code(conn: sqlite3.Connection) -> None:
 def _migrate_review_status(conn: sqlite3.Connection) -> None:
     cur = conn.execute("PRAGMA table_info(imoveis)")
     cols = {r[1] for r in cur.fetchall()}
+    if not cols:
+        return
     if "review_status" not in cols:
         conn.execute("ALTER TABLE imoveis ADD COLUMN review_status TEXT")
+
+
+def _migrate_archived_columns(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "imoveis"):
+        return
+    cur = conn.execute("PRAGMA table_info(imoveis)")
+    cols = {r[1] for r in cur.fetchall()}
+    if not cols:
+        return
+    if "archived" not in cols:
+        conn.execute(
+            "ALTER TABLE imoveis ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+        )
+    if "source_inactive" not in cols:
+        conn.execute(
+            "ALTER TABLE imoveis ADD COLUMN source_inactive INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
@@ -65,6 +110,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(sql)
     _migrate_listing_code(conn)
     _migrate_review_status(conn)
+    _migrate_archived_columns(conn)
     conn.commit()
 
 
@@ -194,6 +240,14 @@ def record_from_row(row: sqlite3.Row) -> dict[str, Any]:
         rec["_price_changed_at"] = row["price_changed_at"]
     if row["price_change_count"] is not None:
         rec["_price_change_count"] = int(row["price_change_count"] or 0)
+    if "archived" in row.keys() and row["archived"] is not None:
+        rec["archived"] = int(row["archived"])
+    else:
+        rec["archived"] = 0
+    if "source_inactive" in row.keys() and row["source_inactive"] is not None:
+        rec["source_inactive"] = int(row["source_inactive"])
+    else:
+        rec["source_inactive"] = 0
     return rec
 
 
@@ -213,13 +267,43 @@ def update_review_fields(
     notes: str | None,
     comments: str | None,
     review_status: str | None = None,
+    archived: int | None = None,
 ) -> None:
     """Atualiza apenas campos de revisão humana."""
     tags_j = _json_dumps(tags) if tags is not None else None
+    ar = 0 if archived is None else (1 if int(archived) else 0)
     conn.execute(
         Q.UPDATE_REVIEW_FIELDS,
-        (tags_j, category, rating, notes, comments, review_status, property_id),
+        (tags_j, category, rating, notes, comments, review_status, ar, property_id),
     )
+
+
+def set_review_status_only(
+    conn: sqlite3.Connection,
+    property_id: str,
+    status: str | None,
+) -> None:
+    conn.execute(Q.UPDATE_REVIEW_STATUS_ONLY, (status, property_id))
+
+
+def set_archived_only(
+    conn: sqlite3.Connection,
+    property_id: str,
+    archived: int,
+) -> None:
+    conn.execute(Q.UPDATE_ARCHIVED_ONLY, (1 if archived else 0, property_id))
+
+
+def _log_upsert_line(
+    action: str,
+    property_id: str,
+    listing_code: int | None,
+    *,
+    price_changed: bool = False,
+) -> None:
+    extra = f" code={listing_code}" if listing_code is not None else ""
+    pc = " price_changed" if price_changed else ""
+    print(f"[db] {action} id={property_id}{extra}{pc}", file=sys.stderr, flush=True)
 
 
 def upsert_import_records(
@@ -227,11 +311,17 @@ def upsert_import_records(
     records: list[dict[str, Any]],
     *,
     agency: str,
+    log_each_save: bool = False,
+    commit_each: bool = False,
 ) -> dict[str, int]:
     """
     Insere ou atualiza anúncios vindos do importador.
     Preserva tags, category, rating, notes, comments existentes.
     Atualiza preço com price_previous / price_changed_at quando price_current muda.
+
+    ``log_each_save``: uma linha em stderr por INSERT/UPDATE.
+    ``commit_each``: COMMIT após cada registo (recomendado no importador longo;
+    evita perder tudo se o processo morrer antes do fim).
     """
     stats = {
         "inserted": 0,
@@ -314,9 +404,15 @@ def upsert_import_records(
                         None,
                         None,
                         None,
+                        0,
+                        0,
                     ),
                 )
                 stats["inserted"] += 1
+                if log_each_save:
+                    _log_upsert_line("insert", pid, listing_code)
+                if commit_each:
+                    conn.commit()
                 continue
 
             row_id = ex["id"]
@@ -330,6 +426,16 @@ def upsert_import_records(
                 if "review_status" in ex.keys()
                 else None
             )
+            ex_archived = (
+                int(ex["archived"])
+                if "archived" in ex.keys() and ex["archived"] is not None
+                else 0
+            )
+            ex_source_inactive = (
+                int(ex["source_inactive"])
+                if "source_inactive" in ex.keys() and ex["source_inactive"] is not None
+                else 0
+            )
 
             old_pc = ex["price_current"]
             old_pcc = int(ex["price_change_count"] or 0)
@@ -339,6 +445,7 @@ def upsert_import_records(
             final_pchg_at = ex["price_changed_at"]
             final_pcc = old_pcc
 
+            price_changed_row = False
             if new_price is not None:
                 if old_pc is None:
                     final_pc = new_price
@@ -348,6 +455,7 @@ def upsert_import_records(
                     final_pchg_at = now
                     final_pcc = old_pcc + 1
                     stats["price_changes"] += 1
+                    price_changed_row = True
                 else:
                     final_pc = new_price
 
@@ -379,12 +487,24 @@ def upsert_import_records(
                     notes,
                     comments,
                     review_rs,
+                    ex_archived,
+                    ex_source_inactive,
                     row_id,
                 ),
             )
             stats["updated"] += 1
+            if log_each_save:
+                _log_upsert_line(
+                    "update",
+                    str(row_id),
+                    listing_code,
+                    price_changed=price_changed_row,
+                )
+            if commit_each:
+                conn.commit()
 
-        conn.commit()
+        if not commit_each:
+            conn.commit()
     except Exception:
         conn.rollback()
         raise

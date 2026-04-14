@@ -1,12 +1,12 @@
 # Mobihunter
 
-Buscador pessoal de imóveis: importação para SQLite (`data/imoveis.db`) e revisão com interface web (NiceGUI).
+Importação de anúncios para SQLite (`data/imoveis.db`) e listagem simples na web (`mobihunter/web`).
 
-A documentação de visão do produto, modelo de dados, pastas e fases de implementação está em **[docs/VISAO.md](docs/VISAO.md)**. A especificação de **sincronização e desativação** de anúncios ausentes na origem (regra comum a todos os importadores) está em **[docs/SPEC_SINCRONIZACAO_E_DESATIVACAO.md](docs/SPEC_SINCRONIZACAO_E_DESATIVACAO.md)**.
+Documentação: [docs/VISAO.md](docs/VISAO.md) · [sincronização e desativação](docs/SPEC_SINCRONIZACAO_E_DESATIVACAO.md).
 
-## Importação (Foxter)
+## Instalação
 
-Na raiz do repositório, com ambiente virtual:
+Na raiz do repositório:
 
 ```bash
 python3 -m venv .venv
@@ -15,42 +15,30 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-Copie `config/foxter_urls.example.json` para `config/foxter_urls.json`, edite as URLs e execute (o ficheiro é lido automaticamente se existir):
+## Importar (Foxter)
+
+Opcional: copie `config/foxter_urls.example.json` para `config/foxter_urls.json` e edite as URLs (o script usa esse ficheiro automaticamente se existir).
 
 ```bash
 python scripts/importers/foxter.py
 ```
 
-**Busca filtrada (Foxter Cia — todas as páginas):** use uma URL de listagem (`.../imoveis/a-venda/...`) com `--search-url` ou um objeto `{"search_url": "..."}` no JSON. O script abre o Chromium (headless), percorre `?page=1`, `?page=2`, … e importa cada imóvel pelo detalhe `/imovel/{código}`.
+Import mais rápido: `--skip-photo-check` (não valida URLs de fotos). Por defeito o script faz COMMIT a cada 25 imóveis (`--commit-every N`; use `1` para gravar um a um). Ver `python scripts/importers/foxter.py --help` para `--workers`, `--page-workers`, `--max-photo-checks`, etc.
+
+## Interface web (listagem)
+
+Na raiz do projeto, com o venv ativo e dependências instaladas (`pip install -r requirements.txt`):
 
 ```bash
-python scripts/importers/foxter.py --search-url "https://www.foxterciaimobiliaria.com.br/imoveis/..."
+python -m mobihunter.web
 ```
 
-Ou uma URL avulsa de **anúncio** (incluindo teste sem gravar):
+Abre em **http://127.0.0.1:9090** (filtros: preço mín/máx e código do anúncio). Usa `data/imoveis.db` — importe dados antes com o Foxter.
 
-```bash
-python scripts/importers/foxter.py --url "https://www.foxterciaimobiliaria.com.br/imovel/123" --dry-run
-```
+Outra porta: `MOBIHUNTER_UI_PORT=8080 python -m mobihunter.web`
 
-Os dados são gravados em **`data/imoveis.db`** (WAL, adequado a leituras paralelas). Na reimportação mantêm-se tags/categoria/notas/comentários; o preço é atualizado com rastreio (`price_previous`, `price_changed_at`, `price_change_count`).
+## Código partilhado
 
-**Progresso para a UI:** `python scripts/importers/foxter.py --machine-progress` emite uma linha JSON por evento em **stdout** (fases `start`, `pages`, `detail`, `done`); mensagens legíveis vão para **stderr**.
-
-## App de revisão (web) — NiceGUI
-
-Interface **NiceGUI** (AG Grid, filtros, paginação, fotos e revisão). Usa **`data/imoveis.db`** se existir e tiver registos; caso contrário lê **`data/imoveis.json`**. A lógica partilha os módulos em `app_review/` (`filters`, `pagination`, `data_source`).
-
-Na raiz do repositório, com o ambiente virtual ativo:
-
-```bash
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python -m nicegui_app.main
-```
-
-Abre o browser em **`http://localhost:9090`** (porta por defeito; outra: `MOBIHUNTER_PORT=8080 python -m nicegui_app.main`). Clique numa linha da tabela para ver o detalhe e gravar a revisão.
-
-**Alternativa legada (Streamlit):** `streamlit run app_review/app.py` (porta 8501).
+Em `app_review/` ficam filtros, paginação e `data_source` (SQLite). A UI em `mobihunter/web/` reutiliza isso.
 
 Evite versionar ficheiros grandes ou sensíveis em `data/` sem necessidade (pode usar `.gitignore` local).

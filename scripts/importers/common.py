@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 # Campos geridos pelo utilizador na app de revisão — não sobrescrever na reimportação.
 REVIEW_KEYS: frozenset[str] = frozenset(
-    {"tags", "category", "rating", "notes", "comments", "review_status"}
+    {"tags", "category", "rating", "notes", "comments", "review_status", "archived"}
 )
 
 # Raiz do repositório: .../mobihunter/scripts/importers/common.py -> parents[2]

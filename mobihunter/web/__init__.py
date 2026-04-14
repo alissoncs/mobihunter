@@ -1,0 +1,1 @@
+"""UI web (FastAPI)."""

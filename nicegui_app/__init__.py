@@ -1,1 +1,0 @@
-"""UI Mobihunter com NiceGUI."""

@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS imoveis (
     rating REAL,
     notes TEXT,
     comments TEXT,
-    review_status TEXT
+    review_status TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    source_inactive INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_imoveis_agency ON imoveis(agency);
 CREATE INDEX IF NOT EXISTS idx_imoveis_imported ON imoveis(imported_at);
