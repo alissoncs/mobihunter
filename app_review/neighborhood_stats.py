@@ -94,6 +94,9 @@ def aggregate_by_neighborhood(
             if pr is not None and ar is not None and ar > 0:
                 ppm.append(pr / ar)
 
+        price_mean = sum(prices) / len(prices) if prices else None
+        brl_m2_mean = sum(ppm) / len(ppm) if ppm else None
+
         rows.append(
             {
                 "city": cl,
@@ -101,9 +104,11 @@ def aggregate_by_neighborhood(
                 "count": len(items),
                 "with_price": len(prices),
                 "price_min": min(prices) if prices else None,
+                "price_mean": price_mean,
                 "price_median": _median(prices),
                 "price_max": max(prices) if prices else None,
                 "m2_median": _median(areas),
+                "brl_m2_mean": brl_m2_mean,
                 "brl_m2_median": _median(ppm),
             }
         )

@@ -126,6 +126,22 @@ def _json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
+def _merge_features_json(
+    existing_json: str | None, incoming: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Junta `features` já guardados com os vindos da importação.
+    Chaves presentes no import substituem as antigas; chaves só locais mantêm-se.
+    """
+    try:
+        prev = json.loads(existing_json or "{}")
+    except json.JSONDecodeError:
+        prev = {}
+    if not isinstance(prev, dict):
+        prev = {}
+    return {**prev, **incoming}
+
+
 def _extract_listing_code(raw: dict[str, Any]) -> int | None:
     v = raw.get("listing_code")
     if v is not None:
@@ -316,8 +332,14 @@ def upsert_import_records(
 ) -> dict[str, int]:
     """
     Insere ou atualiza anúncios vindos do importador.
-    Preserva tags, category, rating, notes, comments existentes.
-    Atualiza preço com price_previous / price_changed_at quando price_current muda.
+
+    Em **atualização** de linha existente, mantém-se inalterados os campos de revisão
+    humana já na base: ``tags_json``, ``category``, ``rating``, ``notes``, ``comments``,
+    ``review_status`` (like / dislike / vazio), ``archived`` e ``source_inactive``.
+    O anúncio é atualizado (preço, fotos, texto, morada, ``features_json``, etc.).
+
+    ``features_json``: faz-se merge do JSON existente com o vindo do importador
+    (chaves novas na origem substituem; chaves só locais preservam-se).
 
     ``log_each_save``: uma linha em stderr por INSERT/UPDATE.
     ``commit_each``: COMMIT após cada registo (recomendado no importador longo;
@@ -459,6 +481,8 @@ def upsert_import_records(
                 else:
                     final_pc = new_price
 
+            merged_features = _merge_features_json(ex["features_json"], features)
+
             conn.execute(
                 Q.UPDATE_IMOVEL_AFTER_IMPORT,
                 (
@@ -480,7 +504,7 @@ def upsert_import_records(
                     city,
                     neighborhood,
                     state,
-                    _json_dumps(features),
+                    _json_dumps(merged_features),
                     tags_j,
                     category,
                     rating,

@@ -15,15 +15,37 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-## Importar (Foxter)
+## Importar (Foxter e Guarida)
 
-Opcional: copie `config/foxter_urls.example.json` para `config/foxter_urls.json` e edite as URLs (o script usa esse ficheiro automaticamente se existir).
+1. Copie `config/urls.example.json` para `config/urls.json` e edite as URLs.
+2. Cada importador lê **apenas** esse ficheiro (sem argumentos de linha de comandos nos scripts Python).
+3. O mesmo JSON pode misturar URLs de várias imobiliárias; **cada script ignora o que não for da sua origem** (Foxter: domínios Foxter; Guarida: `guarida.com.br` com `/busca/...`).
+
+**Correr todos os importadores em sequência:**
+
+```bash
+./run-import-all.sh
+```
+
+**Só uma imobiliária** (única opção do shell script; slug = campo `agency` na base: `foxter`, `guarida`):
+
+```bash
+./run-import-all.sh --agency guarida
+./run-import-all.sh --agency foxter
+```
+
+**Um importador diretamente** (lê `config/urls.json`):
 
 ```bash
 python scripts/importers/foxter.py
+python scripts/importers/guarida.py
 ```
 
-Import mais rápido: `--skip-photo-check` (não valida URLs de fotos). Por defeito o script faz COMMIT a cada 25 imóveis (`--commit-every N`; use `1` para gravar um a um). Ver `python scripts/importers/foxter.py --help` para `--workers`, `--page-workers`, `--max-photo-checks`, etc.
+Para um só anúncio Foxter ou uma busca, coloque a URL em `config/urls.json` e corra `python scripts/importers/foxter.py`. O mesmo fluxo em código: `from scripts.importers.foxter import import_foxter_product_url` (na raiz do projeto, com `PYTHONPATH` ou `python -c` a partir da raiz).
+
+### Guarida
+
+Coloque no `urls.json` uma **URL de busca** copiada do browser (de preferência com query string de filtros), por exemplo `https://guarida.com.br/busca/comprar/porto-alegre-rs?...`. Cada imóvel fica com `agency=guarida`, `source_url` em `https://guarida.com.br/...` e fotos em `photos_json`.
 
 ## Interface web (listagem)
 
@@ -33,7 +55,7 @@ Na raiz do projeto, com o venv ativo e dependências instaladas (`pip install -r
 python -m mobihunter.web
 ```
 
-Abre em **http://127.0.0.1:9090** (filtros: preço mín/máx e código do anúncio). Usa `data/imoveis.db` — importe dados antes com o Foxter.
+Abre em **http://127.0.0.1:9090** (filtros: preço mín/máx e código do anúncio). Usa `data/imoveis.db` — importe dados antes.
 
 Outra porta: `MOBIHUNTER_UI_PORT=8080 python -m mobihunter.web`
 

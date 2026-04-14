@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Mobihunter — Estatísticas{% endblock %}
+{% block tagline %}Resumo e gráficos por bairro{% endblock %}
+{% block extra_css %}
+    .stats-intro { color: #64748b; font-size: 0.9rem; margin: 0 0 1rem; max-width: 52rem; line-height: 1.5; }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .kpi {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .kpi .val { font-size: 1.5rem; font-weight: 800; color: #0f766e; letter-spacing: -0.02em; }
+    .kpi .lbl { font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 0.25rem; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+    .chart-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 1rem 1rem 0.5rem;
+      min-height: 0;
+    }
+    .chart-card h2 {
+      font-size: 1rem;
+      color: #115e59;
+      margin: 0 0 0.75rem;
+      font-weight: 700;
+    }
+    .chart-card .sub { font-size: 0.78rem; color: #64748b; font-weight: 500; margin: -0.35rem 0 0.75rem; }
+    .chart-wrap { position: relative; width: 100%; }
+    .empty-chart { color: #94a3b8; font-size: 0.9rem; padding: 2rem; text-align: center; }
+{% endblock %}
+
+{% block content %}
+  <p class="stats-intro">
+    Contadores sobre <strong>toda a base</strong>. Os gráficos usam só imóveis <strong>não arquivados</strong>
+    ({{ market_count }} registo(s)), <strong>todos os grupos cidade+bairro</strong> ({{ hood_groups_count }}) por volume de anúncios.
+    Cada barra só aparece se houver preço médio ou R$/m² calculável para esse grupo.
+  </p>
+
+  <div class="kpi-grid" role="region" aria-label="Resumo numérico">
+    <div class="kpi"><div class="val">{{ kpis.total }}</div><div class="lbl">Total na base</div></div>
+    <div class="kpi"><div class="val">{{ kpis.ativos }}</div><div class="lbl">Não arquivados</div></div>
+    <div class="kpi"><div class="val">{{ kpis.arquivados }}</div><div class="lbl">Arquivados</div></div>
+    <div class="kpi"><div class="val">{{ kpis.removidos_site }}</div><div class="lbl">Removidos do site</div></div>
+    <div class="kpi"><div class="val">{{ kpis.com_preco }}</div><div class="lbl">Com preço</div></div>
+    <div class="kpi"><div class="val">{{ kpis.likes }}</div><div class="lbl">Likes</div></div>
+    <div class="kpi"><div class="val">{{ kpis.dislikes }}</div><div class="lbl">Dislikes</div></div>
+    <div class="kpi"><div class="val">{{ kpis.sem_review }}</div><div class="lbl">Sem like/dislike</div></div>
+    <div class="kpi"><div class="val">{{ kpis.agencias_distintas }}</div><div class="lbl">Imobiliárias (distintas)</div></div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-card">
+      <h2>Preço médio por bairro</h2>
+      <p class="sub">Média dos preços nos anúncios do bairro (ativos)</p>
+      {% if chart_price.labels|length == 0 %}
+        <div class="empty-chart">Sem dados suficientes (falta preço nos anúncios).</div>
+      {% else %}
+        <div class="chart-wrap" style="height: {{ chart_price_height }}px"><canvas id="chartPrice" aria-label="Gráfico preço médio por bairro"></canvas></div>
+      {% endif %}
+    </div>
+    <div class="chart-card">
+      <h2>R$ por m² por bairro</h2>
+      <p class="sub">Mediana do R$/m² entre anúncios com área e preço (ativos)</p>
+      {% if chart_m2.labels|length == 0 %}
+        <div class="empty-chart">Sem dados suficientes (falta área ou preço).</div>
+      {% else %}
+        <div class="chart-wrap" style="height: {{ chart_m2_height }}px"><canvas id="chartM2" aria-label="Gráfico R por metro quadrado por bairro"></canvas></div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+(function() {
+  const teal = '#0d9488';
+  const tealLight = 'rgba(13, 148, 136, 0.25)';
+  const fmtBrl = function(n) {
+    return 'R$ ' + Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  };
+  const fmtM2 = function(n) {
+    return fmtBrl(n) + ' / m²';
+  };
+
+  const chartPrice = {{ chart_price | tojson }};
+  const chartM2 = {{ chart_m2 | tojson }};
+
+  const commonOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    indexAxis: 'y',
+    plugins: {
+      legend: { display: false },
+    },
+    scales: {
+      x: {
+        grid: { color: 'rgba(148, 163, 184, 0.25)' },
+        ticks: {
+          callback: function(v) { return Number(v).toLocaleString('pt-BR'); },
+        },
+      },
+      y: {
+        grid: { display: false },
+        ticks: { font: { size: 11 }, maxRotation: 0, autoSkip: false },
+      },
+    },
+  };
+
+  if (chartPrice.labels && chartPrice.labels.length) {
+    new Chart(document.getElementById('chartPrice'), {
+      type: 'bar',
+      data: {
+        labels: chartPrice.labels,
+        datasets: [{
+          label: 'Preço médio',
+          data: chartPrice.values,
+          backgroundColor: tealLight,
+          borderColor: teal,
+          borderWidth: 1,
+        }],
+      },
+      options: Object.assign({}, commonOpts, {
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) { return fmtBrl(ctx.parsed.x); },
+            },
+          },
+        },
+      }),
+    });
+  }
+
+  if (chartM2.labels && chartM2.labels.length) {
+    new Chart(document.getElementById('chartM2'), {
+      type: 'bar',
+      data: {
+        labels: chartM2.labels,
+        datasets: [{
+          label: 'R$/m²',
+          data: chartM2.values,
+          backgroundColor: 'rgba(6, 95, 70, 0.2)',
+          borderColor: '#047857',
+          borderWidth: 1,
+        }],
+      },
+      options: Object.assign({}, commonOpts, {
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) { return fmtM2(ctx.parsed.x); },
+            },
+          },
+        },
+      }),
+    });
+  }
+})();
+</script>
+{% endblock %}

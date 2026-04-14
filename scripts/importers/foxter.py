@@ -8,24 +8,21 @@ Importador Foxter (Foxter Cia Imobiliária e outros domínios Foxter).
 
 Uso (na raiz do projeto):
   python scripts/importers/foxter.py
-  (lê por defeito config/foxter_urls.json se existir)
 
-  python scripts/importers/foxter.py --config config/foxter_urls.json
-  python scripts/importers/foxter.py --url https://www.foxterciaimobiliaria.com.br/imovel/123
-  python scripts/importers/foxter.py --search-url "https://www.foxterciaimobiliaria.com.br/imoveis/..."
+  Lê sempre ``config/urls.json`` (sem argumentos de linha de comandos).
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import re
+import sqlite3
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 # Permite correr como script sem instalar pacote
@@ -62,7 +59,7 @@ except ImportError:
     tqdm = None  # type: ignore[misc, assignment]
 
 AGENCY = "foxter"
-DEFAULT_CONFIG_PATH = _ROOT / "config" / "foxter_urls.json"
+URLS_CONFIG_PATH = _ROOT / "config" / "urls.json"
 FOXT_CIA_HOST = "www.foxterciaimobiliaria.com.br"
 # CDN usado no HTML de detalhe (carousel); o JSON antigo usa blob.foxter — normalizamos para este padrão.
 FOXT_CDN_WM_480 = "https://images.foxter.com.br/rest/image/outer/480/1/foxter/wm/"
@@ -110,6 +107,35 @@ def is_foxter_cia_search_url(url: str) -> bool:
 
 def is_foxter_cia_imovel_url(url: str) -> bool:
     return FOXT_CIA_HOST in url.lower() and bool(re.search(r"/imovel/\d+", url))
+
+
+def foxter_url_strategy(url: str) -> str:
+    """
+    Estratégia de importação Foxter a partir do host/path (um único JSON pode listar várias URLs;
+    URLs que não forem Foxter são ignoradas por este importador).
+    """
+    u = url.strip()
+    if not u:
+        return "empty"
+    try:
+        host = (urlparse(u).netloc or "").lower()
+    except ValueError:
+        return "unsupported"
+    if not host:
+        return "unsupported"
+
+    cia = FOXT_CIA_HOST.lower()
+    if host == cia or host.endswith("." + cia):
+        if is_foxter_cia_search_url(u):
+            return "foxter_cia_search"
+        if is_foxter_cia_imovel_url(u):
+            return "foxter_cia_detail"
+        return "foxter_cia_page"
+
+    if "foxter" in host:
+        return "foxter_other_host"
+
+    return "unsupported"
 
 
 def imovel_code_from_url(url: str) -> int | None:
@@ -531,19 +557,33 @@ def extract_codes_from_search_html(html: str) -> list[int]:
     return ordered
 
 
+def _code_from_listing_result_item(item: Any) -> int | None:
+    """Foxter pode expor `code` no item ou dentro de `product`."""
+    if not isinstance(item, dict):
+        return None
+    for key in ("code", "id", "listingCode"):
+        v = item.get(key)
+        if v is not None:
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                continue
+    prod = item.get("product")
+    if isinstance(prod, dict) and prod.get("code") is not None:
+        try:
+            return int(prod["code"])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def codes_from_results_list(results: list[Any]) -> list[int]:
-    """Códigos a partir de `pageProps.results[].code` (listagem Next.js)."""
+    """Códigos a partir de `pageProps.results[]` (listagem Next.js)."""
     ordered: list[int] = []
     seen: set[int] = set()
     for item in results:
-        if not isinstance(item, dict):
-            continue
-        c = item.get("code")
-        if c is None:
-            continue
-        try:
-            ci = int(c)
-        except (TypeError, ValueError):
+        ci = _code_from_listing_result_item(item)
+        if ci is None:
             continue
         if ci not in seen:
             seen.add(ci)
@@ -551,16 +591,27 @@ def codes_from_results_list(results: list[Any]) -> list[int]:
     return ordered
 
 
+def _merge_unique_codes(*lists: list[int]) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for lst in lists:
+        for c in lst:
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+    return out
+
+
 def extract_codes_from_listing_html(html: str) -> list[int]:
-    """Preferir JSON `results`; senão links no HTML."""
+    """Junta códigos do JSON `results` e dos links no HTML (SSR pode ter só um dos lados)."""
+    from_json: list[int] = []
     pp = _parse_search_listing_page_props(html)
     if pp:
         results = pp.get("results") or []
         if results:
-            jc = codes_from_results_list(results)
-            if jc:
-                return jc
-    return extract_codes_from_search_html(html)
+            from_json = codes_from_results_list(results)
+    from_html = extract_codes_from_search_html(html)
+    return _merge_unique_codes(from_json, from_html)
 
 
 def collect_codes_from_search_httpx(
@@ -698,6 +749,13 @@ def collect_codes_from_search_httpx(
                     f"· acumulado {len(ordered)}"
                 )
 
+    if log is not None and total > 0 and len(ordered) < total:
+        log(
+            f"[foxter] WARN: {len(ordered)} códigos únicos vs total no site={total}. "
+            "Páginas seguintes podem vir sem `results`/links no HTML estático; "
+            "se faltar muito, use --listing-playwright."
+        )
+
     return ordered
 
 
@@ -790,6 +848,107 @@ def _httpx_limits_for_workers(workers: int, page_workers: int) -> httpx.Limits:
     )
 
 
+class FoxterSingleImportResult(TypedDict):
+    """Resultado de `import_foxter_product_url` (detalhe Foxter Cia → registo normalizado)."""
+
+    record: dict[str, Any]
+    inserted: int
+    updated: int
+    price_changes: int
+    dry_run: bool
+
+
+def import_foxter_product_url(
+    url: str,
+    *,
+    db_path: Path | None = None,
+    dry_run: bool = False,
+    client: httpx.Client | None = None,
+    conn: sqlite3.Connection | None = None,
+    check_photos: bool = True,
+    max_photo_checks: int | None = None,
+    photo_check_workers: int = 6,
+    verbose_db: bool = False,
+) -> FoxterSingleImportResult:
+    """
+    Importa um único anúncio (URL de detalhe Foxter Cia) e grava no SQLite.
+
+    Reutilizável pelo CLI, por uma API ou por outro script. Não aceita URLs de listagem
+    nem outros domínios Foxter (use ``fetch_one_url`` + ``upsert_import_records``).
+
+    Se ``client`` for None, cria um :class:`httpx.Client` interno e fecha-o ao sair.
+    Se ``conn`` for None e não for dry-run, abre a BD com :func:`connect_db` e fecha ao sair;
+    se ``conn`` for passado, não o fecha.
+    """
+    u = url.strip()
+    if not u:
+        raise ValueError("URL vazia.")
+    if is_foxter_cia_search_url(u):
+        raise ValueError(
+            "URL de listagem: use o importador completo (config/urls.json), "
+            "não import_foxter_product_url."
+        )
+    if not is_foxter_cia_imovel_url(u):
+        raise ValueError(
+            "Apenas URLs de detalhe Foxter Cia "
+            "(www.foxterciaimobiliaria.com.br/imovel/CÓDIGO). "
+            "Outros domínios: use fetch_one_url e upsert_import_records."
+        )
+
+    own_client = client is None
+    if own_client:
+        client = httpx.Client(
+            follow_redirects=True,
+            timeout=45.0,
+            headers=DEFAULT_HTTP_HEADERS,
+            limits=_httpx_limits_for_workers(1, 1),
+        )
+
+    try:
+        record = fetch_foxter_cia_imovel(
+            client,
+            u,
+            check_photos=check_photos,
+            max_photo_checks=max_photo_checks,
+            photo_check_workers=photo_check_workers,
+        )
+        if dry_run:
+            return {
+                "record": record,
+                "inserted": 0,
+                "updated": 0,
+                "price_changes": 0,
+                "dry_run": True,
+            }
+
+        close_conn = False
+        c = conn
+        if c is None:
+            c = connect_db(db_path or DEFAULT_DB_PATH)
+            close_conn = True
+        try:
+            st = upsert_import_records(
+                c,
+                [record],
+                agency=AGENCY,
+                log_each_save=verbose_db,
+                commit_each=True,
+            )
+            return {
+                "record": record,
+                "inserted": st["inserted"],
+                "updated": st["updated"],
+                "price_changes": st["price_changes"],
+                "dry_run": False,
+            }
+        finally:
+            if close_conn:
+                c.close()
+    finally:
+        if own_client:
+            client.close()
+
+
 def load_url_list(config_path: Path) -> list[str]:
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     if isinstance(raw, list):
@@ -804,140 +963,41 @@ def load_url_list(config_path: Path) -> list[str]:
                     out.append(str(item["search_url"]))
         return out
     raise ValueError(
-        "O ficheiro de config deve ser uma lista de URLs ou de objetos com url/search_url."
+        "O ficheiro de URLs (ex.: config/urls.json) deve ser uma lista de URLs "
+        "ou de objetos com url/search_url."
     )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Importa anúncios Foxter para SQLite (data/imoveis.db por defeito)"
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help=f"JSON com URLs (se não passar --url/--search-url, usa {DEFAULT_CONFIG_PATH} se existir)",
-    )
-    parser.add_argument(
-        "--url",
-        action="append",
-        dest="urls",
-        default=[],
-        help="URL de um anúncio ou busca Foxter Cia (pode repetir)",
-    )
-    parser.add_argument(
-        "--search-url",
-        action="append",
-        dest="search_urls",
-        default=[],
-        help="URL de uma página de busca (importa todos os imóveis, todas as páginas)",
-    )
-    parser.add_argument(
-        "--db",
-        type=Path,
-        default=None,
-        dest="db_path",
-        help=f"Ficheiro SQLite (predefinido: {DEFAULT_DB_PATH})",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Apenas mostra o que seria gravado, sem escrever ficheiro",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=8,
-        help="Pedidos HTTP paralelos ao obter detalhes (predefinido: 8)",
-    )
-    parser.add_argument(
-        "--headed",
-        action="store_true",
-        help="Abre o Chromium com interface (útil para depurar a busca)",
-    )
-    parser.add_argument(
-        "--max-pages",
-        type=int,
-        default=None,
-        help="Limita o número de páginas de listagem (testes)",
-    )
-    parser.add_argument(
-        "--settle-ms",
-        type=int,
-        default=2000,
-        help="Espera após cada navegação de listagem em ms (predefinido: 2000)",
-    )
-    parser.add_argument(
-        "--no-progress",
-        action="store_true",
-        help="Desativa barras de progresso (listagem playwright + detalhes HTTP)",
-    )
-    parser.add_argument(
-        "--machine-progress",
-        action="store_true",
-        help="Emite uma linha JSON por evento em stdout (para a UI); logs humanos em stderr",
-    )
-    parser.add_argument(
-        "--skip-photo-check",
-        action="store_true",
-        help="Não valida URLs de imagem (HEAD/GET); mais rápido, sem aviso de falha por URL",
-    )
-    parser.add_argument(
-        "--listing-playwright",
-        action="store_true",
-        help="Força listagem com Playwright (uma página de cada vez); por defeito usa HTTP em paralelo",
-    )
-    parser.add_argument(
-        "--page-workers",
-        type=int,
-        default=8,
-        help="Paralelismo ao pedir páginas de listagem via HTTP (predefinido: 8)",
-    )
-    parser.add_argument(
-        "--commit-every",
-        type=int,
-        default=25,
-        metavar="N",
-        help="COMMIT SQLite a cada N imóveis (predefinido: 25; use 1 para fsync por imóvel)",
-    )
-    parser.add_argument(
-        "--verbose-db",
-        action="store_true",
-        help="Uma linha stderr por INSERT/UPDATE no SQLite",
-    )
-    parser.add_argument(
-        "--max-photo-checks",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Valida no máximo N fotos por imóvel; predefinido: todas",
-    )
-    parser.add_argument(
-        "--photo-check-workers",
-        type=int,
-        default=6,
-        help="Paralelismo na validação de fotos por imóvel (predefinido: 6)",
-    )
-    args = parser.parse_args()
-
-    urls: list[str] = list(args.urls)
-    urls.extend(args.search_urls)
-    config_resolved: Path | None = args.config
-    if config_resolved is not None:
-        urls.extend(load_url_list(config_resolved))
-    elif not urls:
-        if DEFAULT_CONFIG_PATH.is_file():
-            config_resolved = DEFAULT_CONFIG_PATH
-            urls.extend(load_url_list(config_resolved))
-        else:
-            parser.error(
-                f"Crie {DEFAULT_CONFIG_PATH} ou use --url, --search-url ou --config"
-            )
+    """Sem CLI: lê sempre ``config/urls.json``; restantes opções são predefinidas no código."""
+    if not URLS_CONFIG_PATH.is_file():
+        print(
+            f"Crie {URLS_CONFIG_PATH} (veja config/urls.example.json).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    urls = load_url_list(URLS_CONFIG_PATH)
     if not urls:
-        parser.error("Lista de URLs vazia.")
+        print(
+            f"{URLS_CONFIG_PATH} não contém URLs.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    show_progress = not args.no_progress and not args.machine_progress
-    machine = args.machine_progress
+    db_path = DEFAULT_DB_PATH
+    workers = 8
+    page_workers = 8
+    commit_every = max(1, 25)
+    headless = True
+    max_pages: int | None = None
+    settle_ms = 2000
+    show_progress = True
+    machine = False
+    check_photos = True
+    listing_playwright = False
+    verbose_db = False
+    max_photo_checks: int | None = None
+    photo_check_workers = max(1, 6)
 
     def emit_machine(obj: dict[str, Any]) -> None:
         if machine:
@@ -949,25 +1009,17 @@ def main() -> None:
 
     emit_machine({"phase": "start", "urls": [u.strip() for u in urls if u.strip()]})
 
-    db_path = args.db_path or DEFAULT_DB_PATH
-    records: list[dict[str, Any]] = []
     stats_total = {"inserted": 0, "updated": 0, "price_changes": 0}
     n_imported = 0
     db_lock = threading.Lock()
-    headless = not args.headed
-    check_photos = not args.skip_photo_check
-    commit_every = max(1, args.commit_every)
-    max_photo_checks = args.max_photo_checks
-    photo_check_workers = max(1, args.photo_check_workers)
 
     log(
-        f"[foxter] {len(urls)} URL(s) · detalhe workers={args.workers} · "
-        f"listagem HTTP page-workers={args.page_workers} · "
+        f"[foxter] {len(urls)} URL(s) · detalhe workers={workers} · "
+        f"listagem HTTP page-workers={page_workers} · "
         f"fotos={'validar URL' if check_photos else 'sem validação'} · "
         f"commit a cada {commit_every} · db={db_path}"
     )
-    if config_resolved is not None:
-        log(f"[foxter] config: {config_resolved}")
+    log(f"[foxter] config: {URLS_CONFIG_PATH}")
     for u in urls:
         log(f"[foxter]   → {u.strip()}")
 
@@ -977,23 +1029,22 @@ def main() -> None:
             follow_redirects=True,
             timeout=45.0,
             headers=DEFAULT_HTTP_HEADERS,
-            limits=_httpx_limits_for_workers(args.workers, args.page_workers),
+            limits=_httpx_limits_for_workers(workers, page_workers),
         ) as client:
-            if not args.dry_run:
-                conn = connect_db(db_path)
-                init_schema(conn)
+            conn = connect_db(db_path)
+            init_schema(conn)
 
             pending_batch: list[dict[str, Any]] = []
 
             def flush_batch() -> None:
-                if args.dry_run or conn is None or not pending_batch:
+                if conn is None or not pending_batch:
                     return
                 with db_lock:
                     st = upsert_import_records(
                         conn,
                         pending_batch,
                         agency=AGENCY,
-                        log_each_save=args.verbose_db,
+                        log_each_save=verbose_db,
                         commit_each=False,
                     )
                     for k in stats_total:
@@ -1003,10 +1054,6 @@ def main() -> None:
 
             def save_record(rec: dict[str, Any]) -> None:
                 nonlocal n_imported
-                if args.dry_run:
-                    records.append(rec)
-                    n_imported += 1
-                    return
                 assert conn is not None
                 pending_batch.append(rec)
                 n_imported += 1
@@ -1017,18 +1064,24 @@ def main() -> None:
                 u = raw_u.strip()
                 if not u:
                     continue
+                strat = foxter_url_strategy(u)
+                if strat == "unsupported":
+                    log(
+                        f"[foxter] ignorado (URL não é Foxter; este importador só trata domínios Foxter): {u}"
+                    )
+                    continue
                 if is_foxter_cia_search_url(u):
 
                     def on_page(ev: dict[str, Any]) -> None:
                         emit_machine(ev)
 
-                    if args.listing_playwright:
+                    if listing_playwright:
                         log(f"[foxter] listagem (Playwright): {u}")
                         codes = collect_codes_from_search_playwright(
                             u,
                             headless=headless,
-                            max_pages=args.max_pages,
-                            settle_ms=args.settle_ms,
+                            max_pages=max_pages,
+                            settle_ms=settle_ms,
                             show_progress=show_progress,
                             on_page=on_page if machine else None,
                         )
@@ -1038,8 +1091,8 @@ def main() -> None:
                             codes = collect_codes_from_search_httpx(
                                 client,
                                 u,
-                                max_pages=args.max_pages,
-                                page_workers=args.page_workers,
+                                max_pages=max_pages,
+                                page_workers=page_workers,
                                 show_progress=show_progress,
                                 on_page=on_page if machine else None,
                                 log=log,
@@ -1052,8 +1105,8 @@ def main() -> None:
                             codes = collect_codes_from_search_playwright(
                                 u,
                                 headless=headless,
-                                max_pages=args.max_pages,
-                                settle_ms=args.settle_ms,
+                                max_pages=max_pages,
+                                settle_ms=settle_ms,
                                 show_progress=show_progress,
                                 on_page=on_page if machine else None,
                             )
@@ -1079,7 +1132,7 @@ def main() -> None:
                             bar_format="{desc} {n}/{total}|{bar}|{elapsed}",
                         )
 
-                    if args.workers <= 1:
+                    if workers <= 1:
                         try:
                             for i, code in enumerate(codes, 1):
                                 emit_machine(
@@ -1104,7 +1157,7 @@ def main() -> None:
                     else:
                         try:
                             with ThreadPoolExecutor(
-                                max_workers=args.workers
+                                max_workers=workers
                             ) as ex:
                                 futs = {
                                     ex.submit(load_code, c): c for c in codes
@@ -1143,33 +1196,33 @@ def main() -> None:
                                 detail_pbar.close()
                 else:
                     log(f"[foxter] URL única: {u}")
-                    save_record(
-                        fetch_one_url(
-                            client,
+                    if is_foxter_cia_imovel_url(u):
+                        res = import_foxter_product_url(
                             u,
+                            db_path=db_path,
+                            dry_run=False,
+                            client=client,
+                            conn=conn,
                             check_photos=check_photos,
                             max_photo_checks=max_photo_checks,
                             photo_check_workers=photo_check_workers,
+                            verbose_db=verbose_db,
                         )
-                    )
+                        for key in ("inserted", "updated", "price_changes"):
+                            stats_total[key] += res[key]
+                        n_imported += 1
+                    else:
+                        save_record(
+                            fetch_one_url(
+                                client,
+                                u,
+                                check_photos=check_photos,
+                                max_photo_checks=max_photo_checks,
+                                photo_check_workers=photo_check_workers,
+                            )
+                        )
 
-            if not args.dry_run:
-                flush_batch()
-
-        if args.dry_run:
-            log(f"[foxter] dry-run: {len(records)} registos (nada gravado)")
-            print(
-                json.dumps(records, ensure_ascii=False, indent=2),
-                file=sys.stderr if machine else sys.stdout,
-            )
-            emit_machine(
-                {
-                    "phase": "done",
-                    "dry_run": True,
-                    "records": len(records),
-                }
-            )
-            return
+            flush_batch()
 
         log(
             f"[foxter] resumo SQLite ({db_path}): +{stats_total['inserted']} "
@@ -1193,4 +1246,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        print(
+            "Este script não aceita argumentos — use apenas config/urls.json.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     main()

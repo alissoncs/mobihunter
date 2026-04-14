@@ -15,7 +15,7 @@ Os anúncios podem **deixar de existir** no site da imobiliária (vendido, retir
 ## 2. Princípios
 
 1. **Nunca apagar** um imóvel por ter sumido do site — apenas mudar **estado** e **metadados de sincronização**.
-2. **Preservar** sempre campos de **revisão humana** (tags, categoria, notas, comentários, rating), salvo política explícita futura.
+2. **Preservar** sempre campos de **revisão humana** (tags, categoria, notas, comentários, rating, **like/dislike** em `review_status`, `archived`), salvo política explícita futura. Nova importação **atualiza** dados do anúncio na origem (preço, fotos, texto, morada, etc.) sem apagar essa revisão — implementado em `upsert_import_records` (`scripts/importers/sqlite_store.py`).
 3. **Desativação por ausência** só é válida no **âmbito de uma sincronização completa** em que o sistema conhece o **conjunto fechado** de anúncios ainda listados para aquele contexto (ver secção 5).
 4. **Reativação:** se o mesmo `source_url` voltar a aparecer numa sincronização futura, o registo deve poder voltar a **ativo na origem**.
 5. **Idempotência:** repetir a mesma importação não deve alternar estados sem necessidade.

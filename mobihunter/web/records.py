@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from bs4 import BeautifulSoup
+
 
 def listing_code_from_record(rec: dict[str, Any]) -> int | None:
     if rec.get("listing_code") is not None:
@@ -86,3 +88,16 @@ def price_previous_display(rec: dict[str, Any]) -> str:
     if prev is None:
         return "—"
     return fmt_money(prev)
+
+
+def description_plain(rec: dict[str, Any]) -> str:
+    """Texto da descrição sem marcação HTML (para mostrar na tabela)."""
+    raw = rec.get("description")
+    if raw is None:
+        return ""
+    s = str(raw).strip()
+    if not s:
+        return ""
+    text = BeautifulSoup(s, "html.parser").get_text(separator="\n")
+    lines = [ln.strip() for ln in text.splitlines()]
+    return "\n".join(line for line in lines if line)

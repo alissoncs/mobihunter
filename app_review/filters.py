@@ -89,22 +89,31 @@ def apply_filters(
     property_type: str | None,
     only_like: bool = False,
     listing_status: str | None = None,
+    neighborhood: str | None = None,
+    show_dislikes: bool = False,
 ) -> list[dict[str, Any]]:
     """Filtra em memória.
 
     ``listing_status``: ``None`` ou ``\"all\"`` = todos; ``\"active\"`` = não arquivado e ativo na origem;
     ``\"archived\"``; ``\"removed\"`` = removido do site (source_inactive).
+
+    Se ``show_dislikes`` for falso (padrão), exclui registos com ``review_status == \"dislike\"``.
     """
     tq = _norm(text_query)
     tag_set = {_norm(x) for x in (tags_any or []) if _norm(x)}
     pt = _norm(property_type) if property_type else ""
     ag = _norm(agency) if agency else ""
     ls = _norm(listing_status) if listing_status else ""
+    nh = _norm(neighborhood) if neighborhood else ""
 
     out: list[dict[str, Any]] = []
     for r in records:
         if ag and _norm(str(r.get("agency") or "")) != ag:
             continue
+        if nh:
+            rn = _norm(str(r.get("neighborhood") or ""))
+            if nh not in rn:
+                continue
         p = _price(r)
         if price_min is not None and (p is None or p < price_min):
             continue
@@ -119,6 +128,8 @@ def apply_filters(
         if pt and _property_type(r) != pt:
             continue
         if only_like and str(r.get("review_status") or "") != "like":
+            continue
+        if not show_dislikes and str(r.get("review_status") or "").strip() == "dislike":
             continue
         if ls and ls not in ("", "all"):
             a = _archived_int(r)
@@ -163,6 +174,36 @@ def sort_records(records: list[dict[str, Any]], sort_key: str) -> list[dict[str,
         items.sort(key=lambda r: (_imported(r), r.get("id", "")), reverse=True)
     else:
         items.sort(key=lambda r: (_price(r) is None, _price(r) or 0.0, r.get("id", "")))
+    return items
+
+
+def sort_records_active_first_price_asc(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Preço crescente; imóveis não arquivados primeiro, arquivados no fim."""
+    items = list(records)
+    rid = lambda r: str(r.get("id", ""))
+
+    def key_price_asc(r: dict[str, Any]) -> tuple:
+        p = _price(r)
+        if p is None:
+            return (1, 0.0, rid(r))
+        return (0, p, rid(r))
+
+    items.sort(key=lambda r: (_archived_int(r), key_price_asc(r)))
+    return items
+
+
+def sort_records_active_first_price_desc(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Preço decrescente; não arquivados primeiro, arquivados no fim (sem preço no fim do grupo)."""
+    items = list(records)
+    rid = lambda r: str(r.get("id", ""))
+
+    def key_price_desc(r: dict[str, Any]) -> tuple:
+        p = _price(r)
+        if p is None:
+            return (1, 0.0, rid(r))
+        return (0, -float(p), rid(r))
+
+    items.sort(key=lambda r: (_archived_int(r), key_price_desc(r)))
     return items
 
 

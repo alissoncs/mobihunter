@@ -32,20 +32,27 @@
     th { background: #f0fdfa; color: #115e59; font-weight: 600; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
     tr:hover td { background: #fafafa; }
     td.thumb {
-      width: 132px;
+      width: 172px;
       padding: 0.35rem 0.5rem;
     }
+    a.thumb-link {
+      display: block;
+      line-height: 0;
+      border-radius: 6px;
+      outline-offset: 2px;
+    }
+    a.thumb-link:focus-visible { outline: 2px solid #0d9488; }
     td.thumb img {
       display: block;
-      width: 120px;
-      height: 80px;
+      width: 156px;
+      height: 104px;
       object-fit: cover;
       border-radius: 6px;
       background: #e2e8f0;
     }
     .thumb-ph {
-      width: 120px;
-      height: 80px;
+      width: 156px;
+      height: 104px;
       border-radius: 6px;
       background: linear-gradient(145deg, #e2e8f0, #f1f5f9);
       display: flex;
@@ -54,7 +61,21 @@
       color: #94a3b8;
       font-size: 0.75rem;
     }
-    a.cell-link { color: #0d9488; font-weight: 600; }
+    td.price-cell, td.price-prev-cell {
+      white-space: nowrap;
+    }
+    td.cell-desc {
+      font-size: 0.7rem;
+      line-height: 1.4;
+      color: #475569;
+      max-width: min(40rem, 85vw);
+      white-space: pre-wrap;
+      word-break: normal;
+      overflow-wrap: break-word;
+      vertical-align: top;
+      padding-top: 0.5rem;
+      padding-bottom: 0.5rem;
+    }
     .empty { padding: 2rem; text-align: center; color: #64748b; flex: 1; display: flex; align-items: center; justify-content: center; }
     .actions-cell { white-space: nowrap; }
     .btn-icon {
@@ -86,10 +107,28 @@
     }
     .ctx-menu button:hover { background: #f1f5f9; }
     .ctx-menu button.danger { color: #b91c1c; }
+    .pager {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem;
+      margin-top: 0.75rem; margin-bottom: 0.5rem;
+      padding: 0.65rem 1rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 0.875rem; color: #334155;
+    }
+    .pager a { color: #0d9488; font-weight: 600; text-decoration: none; }
+    .pager a:hover { text-decoration: underline; }
+    .pager .muted { color: #64748b; font-weight: 500; }
+    .pager .sep { color: #cbd5e1; user-select: none; }
 {% endblock %}
 
 {% block content %}
-  <p class="meta">Mostrando <strong>{{ count }}</strong> imóvel(is) com os filtros · base: <strong>{{ total_db }}</strong> registo(s)</p>
+  <p class="meta">
+    {% if count %}
+      A mostrar <strong>{{ row_start }}–{{ row_end }}</strong> de <strong>{{ count }}</strong> imóvel(is) com os filtros
+      · página <strong>{{ page }}</strong> de <strong>{{ total_pages }}</strong>
+    {% else %}
+      <strong>0</strong> imóvel(is) com os filtros
+    {% endif %}
+    · base: <strong>{{ total_db }}</strong> registo(s)
+  </p>
 
   <form class="filters" method="get" action="/">
     <label>Preço mín. (R$)
@@ -97,6 +136,14 @@
     </label>
     <label>Preço máx. (R$)
       <input type="text" name="price_max" value="{{ price_max }}" placeholder="ex: 900000" autocomplete="off"/>
+    </label>
+    <label>Bairro
+      <input type="text" name="neighborhood" value="{{ neighborhood }}" placeholder="contém…" list="hood-opts" autocomplete="off"/>
+      <datalist id="hood-opts">
+        {% for h in neighborhood_options %}
+        <option value="{{ h }}"></option>
+        {% endfor %}
+      </datalist>
     </label>
     <label>Código
       <input type="text" name="code" value="{{ code }}" placeholder="ex: 12345" autocomplete="off"/>
@@ -109,13 +156,54 @@
         <option value="removed" {% if listing_status == 'removed' %}selected{% endif %}>Removidos do site</option>
       </select>
     </label>
+    <label>Ordenar por preço
+      <select name="sort">
+        <option value="price_asc" {% if sort == 'price_asc' %}selected{% endif %}>Menor → maior</option>
+        <option value="price_desc" {% if sort == 'price_desc' %}selected{% endif %}>Maior → menor</option>
+      </select>
+    </label>
+    <label>Por página
+      <select name="per_page">
+        <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+        <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+        <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+      </select>
+    </label>
     <label class="chk">
       <input type="checkbox" name="only_like" value="1" {% if only_like %}checked{% endif %}/>
       Só com like
     </label>
+    <label class="chk">
+      <input type="checkbox" name="show_dislikes" value="1" {% if show_dislikes %}checked{% endif %}/>
+      Mostrar dislikes
+    </label>
     <button type="submit">Filtrar</button>
     <a href="/" class="btn secondary">Limpar</a>
   </form>
+
+  {% if count and total_pages > 1 %}
+  <nav class="pager" aria-label="Paginação">
+    {% if page > 1 %}
+      <a href="/?{{ qs_first }}">Primeira</a>
+      <span class="sep">|</span>
+      <a href="/?{{ qs_prev }}">Anterior</a>
+    {% else %}
+      <span class="muted">Primeira</span>
+      <span class="sep">|</span>
+      <span class="muted">Anterior</span>
+    {% endif %}
+    <span class="sep">|</span>
+    {% if page < total_pages %}
+      <a href="/?{{ qs_next }}">Seguinte</a>
+      <span class="sep">|</span>
+      <a href="/?{{ qs_last }}">Última</a>
+    {% else %}
+      <span class="muted">Seguinte</span>
+      <span class="sep">|</span>
+      <span class="muted">Última</span>
+    {% endif %}
+  </nav>
+  {% endif %}
 
   {% if count == 0 %}
     <div class="empty">Nenhum imóvel corresponde aos filtros (ou a base está vazia).</div>
@@ -130,12 +218,9 @@
         <th>Preço</th>
         <th>Preço ant.</th>
         <th>m²</th>
-        <th>Status</th>
         <th>Imobiliária</th>
         <th>Bairro</th>
-        <th>Cidade</th>
-        <th>Título</th>
-        <th>Link</th>
+        <th>Descrição</th>
         <th></th>
       </tr>
     </thead>
@@ -144,38 +229,36 @@
       <tr>
         <td class="thumb">
           {% set u = thumb_url(r) %}
+          {% set su = r.get('source_url') %}
+          {% if su %}
+          <a class="thumb-link" href="{{ su }}" target="_blank" rel="noopener noreferrer" title="Abrir no site">
+          {% endif %}
           {% if u %}
-            <img src="{{ u }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="120" height="80"/>
+            <img src="{{ u }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="156" height="104"/>
           {% else %}
             <div class="thumb-ph">sem foto</div>
+          {% endif %}
+          {% if su %}
+          </a>
           {% endif %}
         </td>
         <td>{{ listing_code_from_record(r) or "—" }}</td>
         <td class="actions-cell">
           <button type="button" class="btn-icon {% if r.get('review_status') == 'like' %}on{% endif %}" title="Gostei" aria-label="Gostei"
-            onclick="mhPost('/api/imovel/{{ r.id }}/review', { status: 'like' })">
+            onclick="mhPost(this, '/api/imovel/{{ r.id }}/review', { status: 'like' })">
             <i data-lucide="thumbs-up"></i>
           </button>
           <button type="button" class="btn-icon dislike {% if r.get('review_status') == 'dislike' %}on dislike{% endif %}" title="Não gostei" aria-label="Não gostei"
-            onclick="mhPost('/api/imovel/{{ r.id }}/review', { status: 'dislike' })">
+            onclick="mhPost(this, '/api/imovel/{{ r.id }}/review', { status: 'dislike' })">
             <i data-lucide="thumbs-down"></i>
           </button>
         </td>
-        <td>{{ fmt_money(r.get('price')) }}</td>
-        <td>{{ price_previous_display(r) }}</td>
+        <td class="price-cell">{{ fmt_money(r.get('price')) }}</td>
+        <td class="price-prev-cell">{{ price_previous_display(r) }}</td>
         <td>{{ area_m2(r) }}</td>
-        <td>{{ row_status_label(r) }}</td>
         <td>{{ agency_label(r) }}</td>
         <td>{{ r.get('neighborhood') or "—" }}</td>
-        <td>{{ r.get('city') or "—" }}</td>
-        <td>{{ (r.get('title') or "—")[:72] }}{% if r.get('title') and r.get('title')|length > 72 %}…{% endif %}</td>
-        <td>
-          {% if r.get('source_url') %}
-            <a class="cell-link" href="{{ r.source_url }}" target="_blank" rel="noopener">abrir</a>
-          {% else %}
-            —
-          {% endif %}
-        </td>
+        <td class="cell-desc">{% set d = description_plain(r) %}{% if d %}{% if d|length > 140 %}{{ d[:140] }}…{% else %}{{ d }}{% endif %}{% else %}—{% endif %}</td>
         <td class="actions-cell">
           <div class="ctx-wrap" onclick="event.stopPropagation()">
             <details>
@@ -183,13 +266,13 @@
               <div class="ctx-menu" role="menu">
                 {% if not r.get('archived') %}
                 <button type="button" role="menuitem" class="danger"
-                  onclick="this.closest('details').removeAttribute('open'); mhPost('/api/imovel/{{ r.id }}/archived', { archived: true })">Arquivar</button>
+                  onclick="this.closest('details').removeAttribute('open'); mhPost(this, '/api/imovel/{{ r.id }}/archived', { archived: true })">Arquivar</button>
                 {% else %}
                 <button type="button" role="menuitem"
-                  onclick="this.closest('details').removeAttribute('open'); mhPost('/api/imovel/{{ r.id }}/archived', { archived: false })">Desarquivar</button>
+                  onclick="this.closest('details').removeAttribute('open'); mhPost(this, '/api/imovel/{{ r.id }}/archived', { archived: false })">Desarquivar</button>
                 {% endif %}
                 <button type="button" role="menuitem"
-                  onclick="this.closest('details').removeAttribute('open'); mhPost('/api/imovel/{{ r.id }}/review', { status: null })">Limpar avaliação</button>
+                  onclick="this.closest('details').removeAttribute('open'); mhPost(this, '/api/imovel/{{ r.id }}/review', { status: null })">Limpar avaliação</button>
               </div>
             </details>
           </div>
@@ -205,25 +288,82 @@
 {% block extra_scripts %}
 <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js" crossorigin="anonymous"></script>
 <script>
+window.MOBIHUNTER = {
+  showDislikes: {{ show_dislikes | tojson }},
+  onlyLike: {{ only_like | tojson }},
+  listingFilter: {{ listing_status | tojson }},
+};
+function mhScrollRestore() {
+  var y = sessionStorage.getItem('mh_scroll');
+  if (y === null) return;
+  sessionStorage.removeItem('mh_scroll');
+  var n = parseInt(y, 10);
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      window.scrollTo(0, isNaN(n) ? 0 : n);
+    });
+  });
+}
+function mhRemoveRowIfFiltered(row, status) {
+  if (window.MOBIHUNTER.onlyLike && status !== 'like') {
+    row.remove();
+    return true;
+  }
+  if (status === 'dislike' && !window.MOBIHUNTER.showDislikes) {
+    row.remove();
+    return true;
+  }
+  return false;
+}
+function mhApplyReviewButtons(row, status) {
+  var cells = row.querySelectorAll('td.actions-cell');
+  var rc = cells[0];
+  if (!rc) return;
+  var likeBtn = rc.querySelector('.btn-icon:not(.dislike)');
+  var dislikeBtn = rc.querySelector('.btn-icon.dislike');
+  if (!likeBtn || !dislikeBtn) return;
+  likeBtn.classList.remove('on');
+  dislikeBtn.classList.remove('on', 'dislike');
+  if (status === 'like') likeBtn.classList.add('on');
+  if (status === 'dislike') dislikeBtn.classList.add('on', 'dislike');
+}
 document.addEventListener('DOMContentLoaded', function() {
   if (window.lucide && lucide.createIcons) lucide.createIcons();
+  mhScrollRestore();
 });
-async function mhPost(url, body) {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+async function mhPost(el, url, body) {
+  var r;
+  try {
+    r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    alert('Falha de rede');
+    return;
+  }
   if (!r.ok) {
     var t = await r.text();
     try {
       var j = JSON.parse(t);
       if (j.detail) t = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
-    } catch (e) {}
+    } catch (e2) {}
     alert(t || ('Erro ' + r.status));
     return;
   }
-  location.reload();
+  if (url.indexOf('/archived') !== -1) {
+    sessionStorage.setItem('mh_scroll', String(window.scrollY));
+    location.reload();
+    return;
+  }
+  var row = el.closest('tr');
+  if (!row) return;
+  var st = body && Object.prototype.hasOwnProperty.call(body, 'status') ? body.status : undefined;
+  if (mhRemoveRowIfFiltered(row, st)) {
+    return;
+  }
+  mhApplyReviewButtons(row, st);
 }
 document.addEventListener('click', function(ev) {
   if (ev.target.closest('.ctx-wrap')) return;
