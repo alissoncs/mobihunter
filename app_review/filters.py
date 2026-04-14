@@ -90,6 +90,7 @@ def apply_filters(
     only_like: bool = False,
     listing_status: str | None = None,
     neighborhood: str | None = None,
+    city: str | None = None,
     show_dislikes: bool = False,
 ) -> list[dict[str, Any]]:
     """Filtra em memória.
@@ -105,6 +106,7 @@ def apply_filters(
     ag = _norm(agency) if agency else ""
     ls = _norm(listing_status) if listing_status else ""
     nh = _norm(neighborhood) if neighborhood else ""
+    ct = _norm(city) if city else ""
 
     out: list[dict[str, Any]] = []
     for r in records:
@@ -113,6 +115,10 @@ def apply_filters(
         if nh:
             rn = _norm(str(r.get("neighborhood") or ""))
             if nh not in rn:
+                continue
+        if ct:
+            rc = _norm(str(r.get("city") or ""))
+            if ct not in rc:
                 continue
         p = _price(r)
         if price_min is not None and (p is None or p < price_min):

@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
+
+_TZ_BR = ZoneInfo("America/Sao_Paulo")
+
+
+def _parse_iso_datetime(raw: Any) -> datetime | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def listing_code_from_record(rec: dict[str, Any]) -> int | None:
@@ -88,6 +109,29 @@ def price_previous_display(rec: dict[str, Any]) -> str:
     if prev is None:
         return "—"
     return fmt_money(prev)
+
+
+def imported_at_human(rec: dict[str, Any]) -> str:
+    """Texto relativo em pt-BR para `imported_at` (ex.: Hoje, Há 3 dias atrás)."""
+    dt = _parse_iso_datetime(rec.get("imported_at"))
+    if dt is None:
+        return "—"
+    now = datetime.now(_TZ_BR)
+    t = dt.astimezone(_TZ_BR)
+    if t > now + timedelta(minutes=1):
+        return "—"
+    if t.date() == now.date():
+        return "Hoje"
+    if t.date() == (now.date() - timedelta(days=1)):
+        return "Ontem"
+    days = (now.date() - t.date()).days
+    if days < 30:
+        return f"Há {days} dias atrás"
+    if days < 365:
+        m = max(1, days // 30)
+        return f"Há {m} mês atrás" if m == 1 else f"Há {m} meses atrás"
+    y = max(1, days // 365)
+    return f"Há {y} ano atrás" if y == 1 else f"Há {y} anos atrás"
 
 
 def description_plain(rec: dict[str, Any]) -> str:

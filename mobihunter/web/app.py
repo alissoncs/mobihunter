@@ -26,8 +26,8 @@ from scripts.importers.sqlite_store import DEFAULT_DB_PATH
 from mobihunter.web.records import (
     agency_label,
     area_m2,
-    description_plain,
     fmt_money,
+    imported_at_human,
     listing_code_from_record,
     price_previous_display,
     thumb_url,
@@ -71,11 +71,25 @@ def _distinct_neighborhoods(records: list[dict[str, Any]]) -> list[str]:
     return out[:500]
 
 
+def _distinct_cities(records: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    for r in records:
+        c = r.get("city")
+        if c is None:
+            continue
+        s = str(c).strip()
+        if s:
+            seen.add(s)
+    out = sorted(seen, key=str.casefold)
+    return out[:500]
+
+
 def _imoveis_query_dict(
     *,
     price_min: str,
     price_max: str,
     code: str,
+    city: str,
     listing_status: str,
     neighborhood: str,
     only_like: bool,
@@ -92,6 +106,8 @@ def _imoveis_query_dict(
         d["price_max"] = price_max.strip()
     if code.strip():
         d["code"] = code.strip()
+    if city.strip():
+        d["city"] = city.strip()
     ls = listing_status.strip() or "all"
     if ls != "all":
         d["listing_status"] = ls
@@ -115,6 +131,7 @@ def _imoveis_query_string(
     price_min: str,
     price_max: str,
     code: str,
+    city: str,
     listing_status: str,
     neighborhood: str,
     only_like: bool,
@@ -129,6 +146,7 @@ def _imoveis_query_string(
             price_min=price_min,
             price_max=price_max,
             code=code,
+            city=city,
             listing_status=listing_status,
             neighborhood=neighborhood,
             only_like=only_like,
@@ -196,6 +214,7 @@ async def list_imoveis(
     price_min: str | None = Query(None, description="Preço mínimo (R$)"),
     price_max: str | None = Query(None, description="Preço máximo (R$)"),
     code: str | None = Query(None, description="Código do anúncio"),
+    city: str | None = Query(None, description="Filtrar por cidade (contém)"),
     only_like: str | None = Query(None, description="Só imóveis com like"),
     show_dislikes: str | None = Query(
         None,
@@ -230,6 +249,7 @@ async def list_imoveis(
     recent_f = _parse_bool(recent_first)
     ls = _norm_listing_status(listing_status)
     hood_q = (neighborhood or "").strip() or None
+    city_q = (city or "").strip() or None
     sort_mode = (sort or "price_asc").strip().lower()
     if sort_mode not in ("price_asc", "price_desc"):
         sort_mode = "price_asc"
@@ -259,6 +279,7 @@ async def list_imoveis(
         only_like=only_l,
         listing_status=ls,
         neighborhood=hood_q,
+        city=city_q,
         show_dislikes=show_d,
     )
     if recent_f:
@@ -289,6 +310,7 @@ async def list_imoveis(
         price_min=price_min or "",
         price_max=price_max or "",
         code=code or "",
+        city=city or "",
         listing_status=ls_form,
         neighborhood=hood_val,
         only_like=only_l,
@@ -309,6 +331,7 @@ async def list_imoveis(
             "price_min": price_min or "",
             "price_max": price_max or "",
             "code": code or "",
+            "city": city or "",
             "only_like": only_l,
             "show_dislikes": show_d,
             "recent_first": recent_f,
@@ -325,13 +348,14 @@ async def list_imoveis(
             "qs_first": _imoveis_query_string(**q_common, page=1),
             "qs_last": _imoveis_query_string(**q_common, page=total_pages),
             "neighborhood_options": _distinct_neighborhoods(records),
+            "city_options": _distinct_cities(records),
             "fmt_money": fmt_money,
             "listing_code_from_record": listing_code_from_record,
             "thumb_url": thumb_url,
             "area_m2": area_m2,
             "agency_label": agency_label,
             "price_previous_display": price_previous_display,
-            "description_plain": description_plain,
+            "imported_at_human": imported_at_human,
             "nav_active": "imoveis",
         },
     )

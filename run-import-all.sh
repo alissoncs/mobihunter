@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Corre todos os importadores configurados, em sequência.
-# Única opção: --agency <slug> para correr só um (foxter ou guarida).
+# Única opção: --agency <slug> para correr só um (foxter, guarida, creditoreal).
 # URLs: cada script Python lê apenas config/urls.json (sem argumentos).
 set -euo pipefail
 
@@ -18,6 +18,7 @@ command -v python >/dev/null 2>&1 && PYTHON=python
 IMPORTERS_SPEC=(
   "foxter:scripts/importers/foxter.py"
   "guarida:scripts/importers/guarida.py"
+  "creditoreal:scripts/importers/creditoreal.py"
 )
 
 FILTER_AGENCY=""
@@ -25,7 +26,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --agency)
       if [[ -z "${2:-}" ]]; then
-        echo "run-import-all.sh: --agency requer um valor (ex.: foxter ou guarida)" >&2
+        echo "run-import-all.sh: --agency requer um valor (ex.: foxter, guarida ou creditoreal)" >&2
         exit 1
       fi
       FILTER_AGENCY="$2"
@@ -53,7 +54,7 @@ if [[ -n "$FILTER_AGENCY" ]]; then
   done
   if [[ "$found" -eq 0 ]]; then
     echo "run-import-all.sh: agency desconhecida: $FILTER_AGENCY" >&2
-    echo "Válidas: foxter, guarida" >&2
+    echo "Válidas: foxter, guarida, creditoreal" >&2
     exit 1
   fi
 fi

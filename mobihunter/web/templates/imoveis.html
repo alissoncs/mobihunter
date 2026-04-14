@@ -32,7 +32,7 @@
     th { background: #f0fdfa; color: #115e59; font-weight: 600; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
     tr:hover td { background: #fafafa; }
     td.thumb {
-      width: 172px;
+      width: 212px;
       padding: 0.35rem 0.5rem;
     }
     a.thumb-link {
@@ -44,15 +44,15 @@
     a.thumb-link:focus-visible { outline: 2px solid #0d9488; }
     td.thumb img {
       display: block;
-      width: 156px;
-      height: 104px;
+      width: 196px;
+      height: 132px;
       object-fit: cover;
       border-radius: 6px;
       background: #e2e8f0;
     }
     .thumb-ph {
-      width: 156px;
-      height: 104px;
+      width: 196px;
+      height: 132px;
       border-radius: 6px;
       background: linear-gradient(145deg, #e2e8f0, #f1f5f9);
       display: flex;
@@ -63,18 +63,6 @@
     }
     td.price-cell, td.price-prev-cell {
       white-space: nowrap;
-    }
-    td.cell-desc {
-      font-size: 0.7rem;
-      line-height: 1.4;
-      color: #475569;
-      max-width: min(40rem, 85vw);
-      white-space: pre-wrap;
-      word-break: normal;
-      overflow-wrap: break-word;
-      vertical-align: top;
-      padding-top: 0.5rem;
-      padding-bottom: 0.5rem;
     }
     .empty { padding: 2rem; text-align: center; color: #64748b; flex: 1; display: flex; align-items: center; justify-content: center; }
     .actions-cell { white-space: nowrap; }
@@ -142,6 +130,14 @@
       <datalist id="hood-opts">
         {% for h in neighborhood_options %}
         <option value="{{ h }}"></option>
+        {% endfor %}
+      </datalist>
+    </label>
+    <label>Cidade
+      <input type="text" name="city" value="{{ city }}" placeholder="contém…" list="city-opts" autocomplete="off"/>
+      <datalist id="city-opts">
+        {% for c in city_options %}
+        <option value="{{ c }}"></option>
         {% endfor %}
       </datalist>
     </label>
@@ -222,9 +218,9 @@
         <th>Preço</th>
         <th>Preço ant.</th>
         <th>m²</th>
+        <th>Importado</th>
         <th>Imobiliária</th>
-        <th>Bairro</th>
-        <th>Descrição</th>
+        <th>Bairro · Cidade</th>
         <th></th>
       </tr>
     </thead>
@@ -238,7 +234,7 @@
           <a class="thumb-link" href="{{ su }}" target="_blank" rel="noopener noreferrer" title="Abrir no site">
           {% endif %}
           {% if u %}
-            <img src="{{ u }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="156" height="104"/>
+            <img src="{{ u }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="196" height="132"/>
           {% else %}
             <div class="thumb-ph">sem foto</div>
           {% endif %}
@@ -260,9 +256,14 @@
         <td class="price-cell">{{ fmt_money(r.get('price')) }}</td>
         <td class="price-prev-cell">{{ price_previous_display(r) }}</td>
         <td>{{ area_m2(r) }}</td>
+        <td title="{{ r.get('imported_at') or '' }}">{{ imported_at_human(r) }}</td>
         <td>{{ agency_label(r) }}</td>
-        <td>{{ r.get('neighborhood') or "—" }}</td>
-        <td class="cell-desc">{% set d = description_plain(r) %}{% if d %}{% if d|length > 140 %}{{ d[:140] }}…{% else %}{{ d }}{% endif %}{% else %}—{% endif %}</td>
+        <td>
+          {{ r.get('neighborhood') or "—" }}
+          {% if r.get('city') %}
+            · {{ r.get('city') }}
+          {% endif %}
+        </td>
         <td class="actions-cell">
           <div class="ctx-wrap" onclick="event.stopPropagation()">
             <details>
